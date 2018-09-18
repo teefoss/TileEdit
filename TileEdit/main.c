@@ -7,84 +7,76 @@
 //
 
 #include <stdio.h>
-#include "sdl.h"
-#include "tffunctions.h"
+#include "sys.h"
 #include <unistd.h>
+
 #include "main.h"
-#include "loadsave.h"
+#include "project.h"
 
-mapobject_t tiledata[ROWS][COLS] = { };
+mapobj_t 	*objects;
 
-int numobjects;
-mapobject_t objects[1200];
-
+// 	array[i][j][k] will be translated to
+//	*( array + i*20*30 + j*30 + k )
+mapobj_t	**displaygrid;
 
 unsigned 	ticks = 0;
 cursor_t	cursor;
 sizetype	tilesize;
 
 bool		fillmode;
+bool		clearmode;
 point_t		fillpoint[2];
 bool		gotfillpt;
 int 		tag = 0;
 
-#pragma mark -
-
-#define NUMINFO 5
-
-SDL_Texture		*images[NUMOBJECTS];
-SDL_Rect 		imagerects[NUMOBJECTS];
-texture_t 		labels[NUMOBJECTS];
-SDL_Rect		labelrects[NUMOBJECTS];
-texture_t		infolabels[NUMINFO];
-SDL_Rect		inforects[NUMINFO];
-
-const char *labelnames[NUMOBJECTS] = {
-	"a Delete",
-	"b Block",
-	"c Portal",
-	"d Player Start",
-	"e Apple"
-};
+#define NUMINFO 4
 
 const char *infonames[NUMINFO] = {
 	"/  Toggle Fill Mode",
 	"1  Save",
 	"22 Revert",
-	"33 Block Fill",
 	"00 Quit without Saving"
 };
 
+typedef struct
+{
+	texture_t 	text;
+	SDL_Rect	textrect;
+	texture_t	image;
+	SDL_Rect	imgrect;
+} label_t;
 
+#define LISTMAX	30
+
+label_t objlabels[LISTMAX];
+label_t infolabels[NUMINFO];
 
 void InitMenu(void)
 {
 	int i;
 	
-	images[0] = NULL;
-	images[BLOCK] = LoadSDLTexture("textures/block.png");
-	images[PORTAL] = LoadSDLTexture("textures/portal.png");
-	images[START] = LoadSDLTexture("editor/snakehead.png");
-	images[APPLE] = LoadSDLTexture("textures/apple.png");
-	
-	for (i=0; i<NUMOBJECTS; i++)
-	{
-		labels[i] = CreateText(labelnames[i], vgacolor[white]);
-		imagerects[i] = SDLRect(MENUX, i*TILESIZE, TILESIZE, TILESIZE);
-		labelrects[i] = SDLRect(LABELSX, i*TILESIZE, labels[i].size.width, labels[i].size.height);
+	// object labels / images
+	for (i=0; i<projinfo.listcount; i++) {
+		objlabels[i].text = CreateText(projinfo.list[i].name, vgacolor[white]);
+		objlabels[i].textrect = (SDL_Rect) { LABELSX, i*TILESIZE, objlabels[i].text.size.width, objlabels[i].text.size.height };
+		objlabels[i].image = textures[i];
+		objlabels[i].imgrect = (SDL_Rect) { EDITORWIDTH, i*TILESIZE, TILESIZE, TILESIZE};
 	}
 	
-	for (i=0; i<NUMINFO; i++)
-	{
-		infolabels[i] = CreateText(infonames[i], vgacolor[yellow]);
-		inforects[i] = SDLRect(0, EDITORHEIGHT+(i*TILESIZE), infolabels[i].size.width, infolabels[i].size.height);
+	// info list at bottom
+	for (i=0; i<NUMINFO; i++) {
+		infolabels[i].text = CreateText(infonames[i], vgacolor[yellow]);
+		infolabels[i].textrect = (SDL_Rect) { 0, EDITORHEIGHT+(i*TILESIZE), infolabels[i].text.size.width, infolabels[i].text.size.height};
 	}
 }
 
 texture_t	settaglabel;
 texture_t	currenttaglabel;
+texture_t	positionlabel;
+
 SDL_Rect	settagrect;
 SDL_Rect	currenttagrect;
+SDL_Rect	positionrect;
 
 void UpdateSetTagLabel (void)
 {
@@ -93,8 +85,6 @@ void UpdateSetTagLabel (void)
 	
 	sprintf(text, "Set Tag: %d", tag);
 	settaglabel = CreateText(text, vgacolor[white]);
-	
-	//printf("w = %d, h = %d\n", taglabel.size.width, taglabel.size.height);
 	
 	tagx = 640-settaglabel.size.width;
 	settagrect = SDLRect(tagx, 480, settaglabel.size.width, settaglabel.size.height);
@@ -112,34 +102,40 @@ void UpdateCurrentTagLabel (int tag)
 	char 		text[32];
 	int 		tagx;
 	
-	if (tag < 100)
-		sprintf(text, "Current Tag: -");
-	else
-		sprintf(text, "Current Tag: %d", tag-100);
+	sprintf(text, "Current Tag: %d", tag);
 	currenttaglabel = CreateText(text, vgacolor[white]);
-	
-	//printf("w = %d, h = %d\n", taglabel.size.width, taglabel.size.height);
 	
 	tagx = 640-currenttaglabel.size.width;
 	currenttagrect = SDLRect(tagx, 480+TILESIZE, currenttaglabel.size.width, currenttaglabel.size.height);
 }
 
 
+void UpdatePositionLabel (void)
+{
+	char 	text[32];
+	int 	x;
+	
+	sprintf(text, "(%d, %d)", cursor.loc.x/TILESIZE, cursor.loc.y/TILESIZE);
+	positionlabel = CreateText(text, vgacolor[white]);
+	x = EDITORWIDTH-positionlabel.size.width;
+	positionrect = SDLRect(x, EDITORHEIGHT+TILESIZE*2, positionlabel.size.width, positionlabel.size.height);
+}
 
 
-void FreeTextures (void)
+
+
+void FreeEditor (void)
 {
 	int i;
 	
-	for (i=0; i<NUMOBJECTS; i++)
+	for (i=0; i<projinfo.listcount; i++)
 	{
-		if (images[i])
-			SDL_DestroyTexture(images[i]);
-		SDL_DestroyTexture(labels[i].texture);
+		SDL_DestroyTexture(objlabels[i].text.texture);
+		SDL_DestroyTexture(objlabels[i].image.texture);
 	}
 	
 	for (i=0; i<NUMINFO; i++)
-		SDL_DestroyTexture(infolabels[i].texture);
+		SDL_DestroyTexture(infolabels[i].text.texture);
 }
 
 
@@ -170,9 +166,6 @@ void Fill(void)
 	int x;
 	int starty, startx;
 	int stopy, stopx;
-
-	if (!fillmode)
-		printf("Error! Fill called when not in fillmode");
 	
 	if (!gotfillpt) {
 		fillpoint[0] = MakePoint(cursor.loc.x, cursor.loc.y);
@@ -181,8 +174,6 @@ void Fill(void)
 	}
 	
 	fillpoint[1] = MakePoint(cursor.loc.x, cursor.loc.y);
-
-	// TODO check both points not -1
 	
 	if (fillpoint[0].x <= fillpoint[1].x) {
 		startx = fillpoint[0].x/TILESIZE;
@@ -205,7 +196,12 @@ void Fill(void)
 	do {
 		x = startx;
 		do {
-//			tiledata[starty][x] = cursor.current;
+			if (clearmode) {
+				displaygrid[starty][x].type = -1;
+				displaygrid[starty][x].tag = -1;
+			} else {
+				displaygrid[starty][x].type = cursor.obj;
+			}
 		} while (x++ < stopx);
 	} while (starty++ < stopy);
 	
@@ -220,7 +216,7 @@ typedef enum { up, down, left, right } direction_t;
 
 void MoveCursor(int dist, direction_t dir)
 {
-	byte *data;
+	mapobj_t *obj_p;
 	
 	switch (dir) {
 		case up:
@@ -252,71 +248,21 @@ void MoveCursor(int dist, direction_t dir)
 			break;
 	}
 	cursor.blink = 1;
-	PrintCursorLocation();
-
-	data = &tiledata[cursor.loc.y/TILESIZE][cursor.loc.x/TILESIZE];
-	UpdateCurrentTagLabel(*data);
-
-}
-
-
-
-void ReplaceObjectAt (int x, int y)
-{
+	//PrintCursorLocation();
+	UpdatePositionLabel();
 	
+	obj_p = &displaygrid[cursor.loc.y/TILESIZE][cursor.loc.x/TILESIZE];
+	UpdateCurrentTagLabel(obj_p->tag);
 }
 
-/// Add a new object at the end of the array
-void NewObjectAt(int x, int y)
-{
-	mapobject_t obj;
-	
-	numobjects++;
-	obj.type = cursor.current;
-	obj.x = x;
-	obj.y = y;
-	obj.tag = tag;
-	objects[numobjects-1] = obj;
-}
 
-void InsertObjectAt(int index)
-{
-	mapobject_t obj;
-	
-	obj.type = cursor.current;
-}
-
-void RemoveObjectAt(int index)
-{
-	objects[index].type = -1;
-}
-
-void PlaceObjectAt (int x, int y)
-{
-	int i;
-	
-	for (i=0; i<numobjects; i++)
-	{
-		if (objects[i].x == x && objects[i].y == y) {
-			if (objects[i].type == -1)
-				InsertObjectAt(i);
-			if (objects[i].type == cursor.current)
-				RemoveObjectAt(i);
-			
-		} else {
-			NewObjectAt(x, y);
-		}
-		
-	}
-}
 
 bool quitting;
 bool reverting;
-bool blockfilling;
 
 bool ProcessEvents(SDL_Event *ev)
 {
-	mapobject_t *obj_p;
+	mapobj_t *obj_p;
 	int dist;
 	
 	const unsigned char *state = SDL_GetKeyboardState(NULL);
@@ -328,9 +274,9 @@ bool ProcessEvents(SDL_Event *ev)
 
 		if (ev->type == SDL_KEYDOWN)
 		{
-			if (ev->key.keysym.scancode >= 4 && ev->key.keysym.scancode < NUMOBJECTS+4) {
-				if (!fillmode || !(objects_t)ev->key.keysym.scancode-4 == PORTAL)
-					cursor.current = (objects_t)ev->key.keysym.scancode-4;
+			if (ev->key.keysym.scancode >= 4 && ev->key.keysym.scancode < projinfo.listcount+4)
+			{
+				cursor.obj = ev->key.keysym.scancode-4;
 				return true;
 			}
 			
@@ -355,12 +301,11 @@ bool ProcessEvents(SDL_Event *ev)
 					break;
 					
 				case SDLK_1:
-					SaveV2File();
+					SaveV3File();
 					break;
 					
 				case SDLK_SLASH:
-					if (cursor.current != PORTAL)
-						fillmode = !fillmode;
+					fillmode = !fillmode;
 					break;
 					
 				case SDLK_0:
@@ -381,17 +326,6 @@ bool ProcessEvents(SDL_Event *ev)
 					}
 					break;
 					
-				case SDLK_3:
-					if (blockfilling) {
-						obj_p = &tiledata[0][0];
-						for (int i=0; i<ROWS*COLS; i++,obj_p++)
-							obj_p->type = BLOCK;
-					} else {
-						blockfilling = true;
-						return true;
-					}
-					break;
-					
 				case SDLK_MINUS:
 					if (tag != 0)
 						tag--;
@@ -406,20 +340,30 @@ bool ProcessEvents(SDL_Event *ev)
 					
 				case SDLK_ESCAPE:
 					gotfillpt = false;
+					fillmode = false;
+					clearmode = false;
+					break;
+					
+				case SDLK_x:
+					obj_p = &displaygrid[cursor.loc.y/TILESIZE][cursor.loc.x/TILESIZE];
+					if (state[SDL_SCANCODE_LSHIFT]) {
+						fillmode = !fillmode;
+						clearmode = true;
+					}
+					else
+						obj_p->type = -1;
 					break;
 					
 				case SDLK_SPACE:
 					
-					obj_p = &tiledata[cursor.loc.y][cursor.loc.x];
+					obj_p = &displaygrid[cursor.loc.y/TILESIZE][cursor.loc.x/TILESIZE];
 					if (!fillmode) {
-						
-						if (cursor.current == EMPTY) {
-							if
+						if (obj_p->type == cursor.obj) {
+							obj_p->type = -1; // remove
 						} else {
-							
+							obj_p->type = cursor.obj;
+							obj_p->tag = tag;
 						}
-						
-						UpdateCurrentTagLabel(tag);
 					} else
 						Fill();
 					
@@ -430,7 +374,6 @@ bool ProcessEvents(SDL_Event *ev)
 			}
 			quitting = false;
 			reverting = false;
-			blockfilling = false;
 		}
 	}
 	return true;
@@ -438,27 +381,29 @@ bool ProcessEvents(SDL_Event *ev)
 
 
 
+#pragma mark -
+
 void DisplayMenu(void)
 {
 	int i;
 	SDL_Rect menuarea, infoarea;
 	
-	menuarea = SDLRect(MENUX, 0, MENUW, SCREENHEIGHT*DPI);
+	menuarea = SDLRect(EDITORWIDTH, 0, SCREENWIDTH-EDITORWIDTH, SCREENHEIGHT);
 	infoarea = SDLRect(0, EDITORHEIGHT, SCREENWIDTH, INFOHEIGHT);
 	
 	// Fill Menu Area
-	SDL_SetRenderDrawColor(renderer, 17, 17, 17, 255);
+	SDL_SetRenderDrawColor(renderer, 32, 32, 32, 255);
 	SDL_RenderFillRect(renderer, &menuarea);
 	SDL_RenderFillRect(renderer, &infoarea);
 
-	for (i=0; i<NUMOBJECTS; i++) {
-		if (i != 0)
-			SDL_RenderCopy(renderer, images[i], NULL, &imagerects[i]);
-		SDL_RenderCopy(renderer, labels[i].texture, NULL, &labelrects[i]);
+	for (i=0; i<projinfo.listcount; i++)
+	{
+		SDL_RenderCopy(renderer, objlabels[i].text.texture, NULL, &objlabels[i].textrect);
+		SDL_RenderCopy(renderer, objlabels[i].image.texture, NULL, &objlabels[i].imgrect);
 	}
 
 	for (i=0; i<NUMINFO; i++)
-		SDL_RenderCopy(renderer, infolabels[i].texture, NULL, &inforects[i]);
+		SDL_RenderCopy(renderer, infolabels[i].text.texture, NULL, &infolabels[i].textrect);
 }
 
 
@@ -466,25 +411,21 @@ void DisplayMenu(void)
 void DisplayMap(void)
 {
 	SDL_Rect	dest;
-	int 		row, col, i;
-	mapobject_t		*data;
-	mapobject_t	*obj_p;
+	int 		row, col;
+	mapobj_t	*obj_p;
 	
-	for (row=0; row<ROWS; row++) {
-		for (col=0; col<COLS; col++) {
-			data = &tiledata[row][col];
+	for (row=0; row<projinfo.rows; row++) {
+		for (col=0; col<projinfo.columns; col++)
+		{
+			obj_p = &displaygrid[row][col];
+			
+			if (obj_p->type == -1)
+				continue; // empty tile
+			
 			dest = SDLRect(col*TILESIZE, row*TILESIZE, TILESIZE, TILESIZE);
-			SDL_RenderCopy(renderer, images[data->type], NULL, &dest);
+			SDL_RenderCopy(renderer, textures[obj_p->type].texture, NULL, &dest);
 		}
 	}
-	
-	
-//	obj_p = &objects[0];
-//	for (i=0; i<numobjects; i++, obj_p++)
-//	{
-//		dest = SDLRect(obj_p->x, obj_p->y, TILESIZE, TILESIZE);
-//		SDL_RenderCopy(renderer, images[obj_p->type], NULL, &dest);
-//	}
 }
 
 
@@ -508,18 +449,13 @@ void DisplayFill(void)
 	dragsize.width = abs(dragpt.x-fixedpt.x)+TILESIZE;
 	dragsize.height = abs(dragpt.y-fixedpt.y)+TILESIZE;
 	dragrect = SDLRectFromPoint(dragorigin, dragsize);
-	
-//	for (y=dragorigin.y; y<dragsize.height-TILESIZE; y+=TILESIZE) {
-//		for (x=dragorigin.x; x<dragsize.width-TILESIZE; x+=TILESIZE) {
-//			dest = SDLRect(x, y, TILESIZE, TILESIZE);
-//			SDL_RenderCopy(renderer, images[cursor.current], NULL, &dest);
-//		}
-//	}
-	
-	for (y=dragorigin.y; y<dragorigin.y+dragsize.height; y+=TILESIZE) {
-		for (x=dragorigin.x; x<dragorigin.x+dragsize.width; x+=TILESIZE) {
-			dest = SDLRect(x, y, TILESIZE, TILESIZE);
-			SDL_RenderCopy(renderer, images[cursor.current], NULL, &dest);
+
+	if (!clearmode) {
+		for (y=dragorigin.y; y<dragorigin.y+dragsize.height; y+=TILESIZE) {
+			for (x=dragorigin.x; x<dragorigin.x+dragsize.width; x+=TILESIZE) {
+				dest = SDLRect(x, y, TILESIZE, TILESIZE);
+				SDL_RenderCopy(renderer, textures[cursor.obj].texture, NULL, &dest);
+			}
 		}
 	}
 	
@@ -535,14 +471,15 @@ void Display(void)
 	
 	SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
 	SDL_RenderClear(renderer);
-	
+
 	DisplayMenu();
 	DisplayMap();
 
 	SDL_RenderCopy(renderer, settaglabel.texture, NULL, &settagrect);
 	SDL_RenderCopy(renderer, currenttaglabel.texture, NULL, &currenttagrect);
+	SDL_RenderCopy(renderer, positionlabel.texture, NULL, &positionrect);
 	
-	// display cursor
+	// CURSOR
 
 	if (fillmode && gotfillpt)
 	{
@@ -551,8 +488,8 @@ void Display(void)
 	else // regular cursor
 	{
 		dest = SDLRect(cursor.loc.x, cursor.loc.y, TILESIZE, TILESIZE);
-		if (cursor.current != 0)
-			SDL_RenderCopy(renderer, images[cursor.current], NULL, &dest);
+		if (!clearmode)
+			SDL_RenderCopy(renderer, textures[cursor.obj].texture, NULL, &dest);
 
 		if (cursor.blink) {
 			if (fillmode) {
@@ -568,50 +505,31 @@ void Display(void)
 }
 
 
+#pragma mark -
 
+// IT BEGINS
 
-int main(int argc, const char * argv[])
+int
+main
+( int		 argc,
+  const char *argv[] )
 {
-	bool newfile;
 	SDL_Event ev;
 	
 	StartSDL();
+	LoadProject(argc, argv);
 	InitMenu();
 
-	chdir("/Users/thomasfoster/Documents/snakedev/maps");
+//	chdir("/Users/thomasfoster/Documents/snakedev/maps");
 	
-	if (argc == 3)
-	{
-		if (strcmp(argv[1], "-new") == 0) {
-			strcpy(filename, argv[2]);
-//			filepath = (char *)argv[2];
-			newfile = true;
-		} else if (strcmp(argv[1], "-open") == 0) {
-//			filepath = (char *)argv[2];
-			strcpy(filename, argv[2]);
-			newfile = false;
-		} else {
-			printf("tileedit [-new or -open] filename\n");
-		}
-	}
-	else
-	{
-		exit(1);
-	}
-	
-	if (!newfile)
-		if (!LoadV2File())
-			printf("Readtiledata: Error! Could not read data from file\n");
-
-	printf("editing %s\n",filename);
-
-	tilesize = MakeSize(TILESIZE, TILESIZE);
+	tilesize = MakeSize(projinfo.tilesize, projinfo.tilesize);
 	UpdateSetTagLabel();
 	UpdateCurrentTagLabel(0);
+	UpdatePositionLabel();
 	
 	// init cursor
-	cursor.loc = ZeroPoint();
-	cursor.current = BLOCK;
+	cursor.loc = MakePoint(EDITORWIDTH/2, EDITORHEIGHT/2);
+	cursor.obj = 0;
 	cursor.blink = 1;
 	
 	while (1)
@@ -627,7 +545,13 @@ int main(int argc, const char * argv[])
 		SDL_Delay(10);
 	}
 	
-	FreeTextures();
+	free(projinfo.list);
+	
+	for (int i=0 ; i<projinfo.rows ; i++)
+		free(displaygrid[i]); // ??
+	free(displaygrid);
+
+	FreeEditor();
 	StopSDL();
 	return 0;
 }

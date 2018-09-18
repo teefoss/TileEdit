@@ -113,10 +113,10 @@ bool tfRectsCollide(rect_t *aRect, rect_t *bRect)
 //
 void
 DrawRectOutline
-( SDL_Renderer *rend,
-  SDL_Rect 	*rect,
-  float 	linewidth,
-  SDL_Color color )
+( SDL_Renderer 	*rend,
+  SDL_Rect 		*rect,
+  float 		linewidth,
+  SDL_Color 	color )
 {
 	box_t 		box;
 	SDL_Rect	rects[4];
@@ -135,6 +135,7 @@ DrawRectOutline
 
 #pragma mark -
 
+// thanks, id
 void ExtractFileName (char *path, char *dest)
 {
 	char		*src;
@@ -148,7 +149,7 @@ void ExtractFileName (char *path, char *dest)
 	strcpy (dest, src);
 }
 
-
+// ditto
 void StripFilename (char *path)
 {
 	char	*c;

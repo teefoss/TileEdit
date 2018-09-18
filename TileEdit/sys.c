@@ -1,5 +1,5 @@
 //
-//  sdl.c
+//  sys.c
 //
 //  Created by Thomas Foster on 4/15/18.
 //  Copyright © 2018 Thomas Foster. All rights reserved.
@@ -8,7 +8,7 @@
 //
 
 
-#include "sdl.h"
+#include "sys.h"
 #include "tffunctions.h"
 //#include <SDL2_mixer/SDL_mixer.h>
 
@@ -101,32 +101,57 @@ SDL_Rect SDLRectFromPoint(point_t pt, sizetype size)
 
 void StartSDL(void)
 {
+	float		hdpi[2];
+	float 		vdpi[2];
+	
 	printf("loading SDL...\n");
 	if (SDL_Init(SDL_INIT_VIDEO) < 0)
 		FatalError("StartSDL: SDL_Init failed!");
 	
 	
-	// create window
+	// WINDOW
 	window = SDL_CreateWindow(WINDOWNAME,
-							  SDL_WINDOWPOS_UNDEFINED,
-							  SDL_WINDOWPOS_UNDEFINED,
+							  0,
+							  0,
 							  SCREENWIDTH,
 							  SCREENHEIGHT,
 							  SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
 	if (!window)
 		FatalError("StartSDL: Could not create window!");
+	//screensurface = SDL_GetWindowSurface(window);
+	for (int i=0; i<2; i++)
+	{
+		SDL_GetDisplayDPI(i, NULL, &hdpi[i], &vdpi[i]);
+		printf("Display %d DPI: h %f, v %f\n", i, hdpi[i], vdpi[i]);
+	}
+
 #ifdef FULLSCREEN
 		SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
 #endif
 	
-	// create renderer
+	
+	// RENDERER
 	renderer = SDL_CreateRenderer(window,-1, 0);
 	if (!renderer)
-		FatalError("InitRenderer: Could not create renderer!");
+		FatalError("StartSDL: Could not create renderer!");
 
-	SDL_RenderSetScale(renderer, 2, 2);
-	// create mixer
-//	Mix_OpenAudio(MIX_DEFAULT_FREQUENCY, MIX_DEFAULT_FORMAT, MIX_DEFAULT_CHANNELS, 512);
+	// hack! FIXME
+	if (hdpi[0] > 100)
+		SDL_RenderSetScale(renderer, 2, 2);
+	else
+		SDL_RenderSetScale(renderer, 1, 1);
+		
+	
+	// SOUND
+#if 0
+	Mix_OpenAudio(MIX_DEFAULT_FREQUENCY,
+				  MIX_DEFAULT_FORMAT,
+				  MIX_DEFAULT_CHANNELS,
+				  512);
+#endif
+	
+	
+	// FONTS
 	
 #ifdef USEFONTS
 	if (TTF_Init() == -1)
@@ -135,7 +160,6 @@ void StartSDL(void)
 	if (!font)
 		FatalError("StartSDL: Could not load font!");
 #endif
-	screensurface = SDL_GetWindowSurface(window);
 	
 	printf("SDL loaded\n");
 }

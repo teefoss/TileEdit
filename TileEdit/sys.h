@@ -1,14 +1,13 @@
 
-#ifndef sdl_h
-#define sdl_h
+#ifndef sys_h
+#define sys_h
 
 #include <SDL2/SDL.h>
 #include <SDL2_image/SDL_image.h>
-#include "type.h"
+#include "tffunctions.h"
 
 // Window Options
 #define WINDOWNAME		"TileEdit"
-#define DPI				1
 #define SCREENWIDTH 	832
 #define SCREENHEIGHT 	560
 //#define FULLSCREEN
@@ -18,7 +17,7 @@
 
 #ifdef USEFONTS
 #include <SDL2_ttf/SDL_ttf.h>
-#define FONTSIZE 16*DPI
+#define FONTSIZE 16
 #define FONTNAME "fonts/Px437_IBM_VGA9.ttf"
 extern TTF_Font	*font;
 #endif
@@ -75,4 +74,4 @@ void StopSDL(void);
 
 void SetDrawColor(SDL_Color c);
 
-#endif /* sdl_h */
+#endif /* sys_h */
